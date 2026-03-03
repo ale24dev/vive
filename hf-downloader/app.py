@@ -3,7 +3,8 @@ import uuid
 import glob
 import logging
 import socket
-from urllib.parse import quote
+import re
+from urllib.parse import quote, urlparse, parse_qs
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse
@@ -30,6 +31,38 @@ app = FastAPI(
 
 DOWNLOAD_DIR = "/tmp/downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+
+
+def extract_clean_url(url: str) -> str:
+    """Extract video ID from any YouTube URL format and return a clean URL.
+
+    Supports:
+      - https://www.youtube.com/watch?v=ID&list=...&start_radio=...
+      - https://youtu.be/ID?list=...
+      - https://youtube.com/watch?v=ID
+      - https://m.youtube.com/watch?v=ID
+      - https://www.youtube.com/shorts/ID
+    """
+    # Try youtu.be short format
+    parsed = urlparse(url)
+    if parsed.hostname and "youtu.be" in parsed.hostname:
+        video_id = parsed.path.lstrip("/")
+        if video_id:
+            return f"https://www.youtube.com/watch?v={video_id}"
+
+    # Try youtube.com/shorts/ID
+    shorts_match = re.match(r"/shorts/([a-zA-Z0-9_-]+)", parsed.path)
+    if shorts_match:
+        return f"https://www.youtube.com/watch?v={shorts_match.group(1)}"
+
+    # Try youtube.com/watch?v=ID (strip playlist params)
+    qs = parse_qs(parsed.query)
+    video_id = qs.get("v", [None])[0]
+    if video_id:
+        return f"https://www.youtube.com/watch?v={video_id}"
+
+    # Fallback: return as-is
+    return url
 
 
 def cleanup_file(filepath: str):
@@ -91,6 +124,9 @@ async def debug_network():
 @app.post("/info")
 async def get_info(req: InfoRequest):
     """Extract video metadata without downloading."""
+    clean_url = extract_clean_url(req.url)
+    logger.info(f"Info request: {req.url} -> {clean_url}")
+
     try:
         ydl_opts = {
             "quiet": True,
@@ -98,7 +134,7 @@ async def get_info(req: InfoRequest):
         }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(req.url, download=False)
+            info = ydl.extract_info(clean_url, download=False)
 
             return {
                 "title": info.get("title"),
@@ -118,6 +154,9 @@ async def download(req: DownloadRequest, background_tasks: BackgroundTasks):
     """Download video/audio and return the file."""
     if req.format not in ("mp3", "mp4"):
         raise HTTPException(status_code=400, detail="Format must be 'mp3' or 'mp4'")
+
+    clean_url = extract_clean_url(req.url)
+    logger.info(f"Download request: {req.url} -> {clean_url}")
 
     file_id = str(uuid.uuid4())
     output_template = os.path.join(DOWNLOAD_DIR, f"{file_id}.%(ext)s")
@@ -157,7 +196,7 @@ async def download(req: DownloadRequest, background_tasks: BackgroundTasks):
 
         # Get video info first for the filename
         with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True}) as ydl:
-            info = ydl.extract_info(req.url, download=False)
+            info = ydl.extract_info(clean_url, download=False)
             video_title = info.get("title", "download")
             artist = info.get("artist") or info.get("uploader") or "Unknown"
             duration = info.get("duration") or 0
@@ -166,7 +205,7 @@ async def download(req: DownloadRequest, background_tasks: BackgroundTasks):
 
         # Download (blocking — runs in thread pool via uvicorn)
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([req.url])
+            ydl.download([clean_url])
 
         # Find the generated file
         pattern = os.path.join(DOWNLOAD_DIR, f"{file_id}.*")
