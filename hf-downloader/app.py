@@ -30,7 +30,26 @@ app = FastAPI(
 )
 
 DOWNLOAD_DIR = "/tmp/downloads"
+COOKIES_FILE = "/tmp/cookies.txt"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+
+# Write cookies from environment variable to file (if provided)
+_cookies_content = os.environ.get("YOUTUBE_COOKIES")
+if _cookies_content:
+    with open(COOKIES_FILE, "w") as f:
+        f.write(_cookies_content)
+    logger.info("YouTube cookies loaded from environment")
+
+
+def get_base_ydl_opts() -> dict:
+    """Return base yt-dlp options, including cookies if available."""
+    opts = {
+        "quiet": True,
+        "no_warnings": True,
+    }
+    if os.path.exists(COOKIES_FILE):
+        opts["cookiefile"] = COOKIES_FILE
+    return opts
 
 
 def extract_clean_url(url: str) -> str:
@@ -128,10 +147,7 @@ async def get_info(req: InfoRequest):
     logger.info(f"Info request: {req.url} -> {clean_url}")
 
     try:
-        ydl_opts = {
-            "quiet": True,
-            "no_warnings": True,
-        }
+        ydl_opts = get_base_ydl_opts()
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(clean_url, download=False)
@@ -162,8 +178,11 @@ async def download(req: DownloadRequest, background_tasks: BackgroundTasks):
     output_template = os.path.join(DOWNLOAD_DIR, f"{file_id}.%(ext)s")
 
     try:
+        base_opts = get_base_ydl_opts()
+
         if req.format == "mp3":
             ydl_opts = {
+                **base_opts,
                 "format": "bestaudio/best",
                 "postprocessors": [
                     {
@@ -177,11 +196,10 @@ async def download(req: DownloadRequest, background_tasks: BackgroundTasks):
                     },
                 ],
                 "outtmpl": output_template,
-                "quiet": True,
-                "no_warnings": True,
             }
         else:
             ydl_opts = {
+                **base_opts,
                 "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
                 "postprocessors": [
                     {
@@ -190,12 +208,10 @@ async def download(req: DownloadRequest, background_tasks: BackgroundTasks):
                     },
                 ],
                 "outtmpl": output_template,
-                "quiet": True,
-                "no_warnings": True,
             }
 
         # Get video info first for the filename
-        with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True}) as ydl:
+        with yt_dlp.YoutubeDL(base_opts) as ydl:
             info = ydl.extract_info(clean_url, download=False)
             video_title = info.get("title", "download")
             artist = info.get("artist") or info.get("uploader") or "Unknown"
