@@ -46,9 +46,11 @@ def get_base_ydl_opts() -> dict:
     opts = {
         "quiet": True,
         "no_warnings": True,
-        # Use a common browser User-Agent to help with cookie acceptance
-        "http_headers": {
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:128.0) Gecko/20100101 Firefox/128.0",
+        # Use TV client which doesn't require PO Token
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["tv"],
+            }
         },
     }
     if os.path.exists(COOKIES_FILE):
