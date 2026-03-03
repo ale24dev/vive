@@ -131,6 +131,7 @@ async def health():
 async def debug_network():
     """Debug endpoint to check outbound network connectivity."""
     import urllib.request
+    import subprocess
     results = {}
 
     # DNS test
@@ -148,12 +149,28 @@ async def debug_network():
     except Exception as e:
         results["http_youtube"] = f"FAIL - {str(e)}"
 
-    # Generic DNS
+    # Check Deno installation
     try:
-        addr = socket.getaddrinfo("huggingface.co", 443)
-        results["dns_hf"] = f"OK - {addr[0][4][0]}"
+        result = subprocess.run(["deno", "--version"], capture_output=True, text=True, timeout=5)
+        results["deno"] = result.stdout.strip().split("\n")[0] if result.returncode == 0 else f"FAIL - {result.stderr}"
     except Exception as e:
-        results["dns_hf"] = f"FAIL - {str(e)}"
+        results["deno"] = f"FAIL - {str(e)}"
+
+    # Check yt-dlp version
+    try:
+        import yt_dlp
+        results["yt_dlp_version"] = yt_dlp.version.__version__
+    except Exception as e:
+        results["yt_dlp_version"] = f"FAIL - {str(e)}"
+
+    # Check yt-dlp-ejs
+    try:
+        import yt_dlp_ejs
+        results["yt_dlp_ejs"] = "OK"
+    except ImportError:
+        results["yt_dlp_ejs"] = "NOT INSTALLED"
+    except Exception as e:
+        results["yt_dlp_ejs"] = f"FAIL - {str(e)}"
 
     return results
 
