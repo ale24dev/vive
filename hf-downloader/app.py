@@ -48,7 +48,7 @@ def get_base_ydl_opts() -> dict:
         "no_warnings": True,
         # Use a common browser User-Agent to help with cookie acceptance
         "http_headers": {
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:128.0) Gecko/20100101 Firefox/128.0",
         },
     }
     if os.path.exists(COOKIES_FILE):
