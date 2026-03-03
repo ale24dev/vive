@@ -106,7 +106,12 @@ class DownloadRequest(BaseModel):
 @app.get("/health")
 async def health():
     """Health check endpoint."""
-    return {"status": "ok", "service": "vive-downloader"}
+    cookies_loaded = os.path.exists(COOKIES_FILE)
+    return {
+        "status": "ok",
+        "service": "vive-downloader",
+        "cookies_loaded": cookies_loaded,
+    }
 
 
 @app.get("/debug/network")
