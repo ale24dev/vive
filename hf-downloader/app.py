@@ -112,10 +112,22 @@ class DownloadRequest(BaseModel):
 async def health():
     """Health check endpoint."""
     cookies_loaded = os.path.exists(COOKIES_FILE)
+    cookies_size = 0
+    cookies_lines = 0
+    if cookies_loaded:
+        try:
+            with open(COOKIES_FILE, "r") as f:
+                content = f.read()
+                cookies_size = len(content)
+                cookies_lines = len([l for l in content.split("\n") if l.strip() and not l.startswith("#")])
+        except Exception:
+            pass
     return {
         "status": "ok",
         "service": "vive-downloader",
         "cookies_loaded": cookies_loaded,
+        "cookies_size": cookies_size,
+        "cookies_lines": cookies_lines,
     }
 
 
