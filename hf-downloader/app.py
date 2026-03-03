@@ -46,10 +46,10 @@ def get_base_ydl_opts() -> dict:
     opts = {
         "quiet": True,
         "no_warnings": True,
-        # Use TV client which doesn't require PO Token
+        # Use tv_simply client - doesn't require PO Token or account
         "extractor_args": {
             "youtube": {
-                "player_client": ["tv"],
+                "player_client": ["tv_simply", "tv"],
             }
         },
     }
