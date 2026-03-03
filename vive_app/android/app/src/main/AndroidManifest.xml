@@ -1,8 +1,18 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Internet for downloading from YouTube -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Storage permissions for Musik_Vive folder -->
+    <!-- READ/WRITE_EXTERNAL_STORAGE for Android 10 and below -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
+    <!-- READ_MEDIA_AUDIO for Android 13+ to read audio files -->
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO"/>
+    <!-- Note: MANAGE_EXTERNAL_STORAGE removed - we use app-specific directories instead -->
     <application
-        android:label="vive"
+        android:label="Vive"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:requestLegacyExternalStorage="true">
         <activity
             android:name=".MainActivity"
             android:exported="true"
