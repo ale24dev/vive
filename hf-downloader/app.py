@@ -155,15 +155,12 @@ def run_download(job: Job):
                     set_job(job)
 
         if job.format == "mp3":
+            # Download best audio in m4a/aac format (no conversion needed)
+            # m4a is widely supported and has better quality than mp3 at same bitrate
             ydl_opts = {
                 **base_opts,
-                "format": "bestaudio/best",
+                "format": "bestaudio[ext=m4a]/bestaudio/best",
                 "postprocessors": [
-                    {
-                        "key": "FFmpegExtractAudio",
-                        "preferredcodec": "mp3",
-                        "preferredquality": "320",
-                    },
                     {
                         "key": "FFmpegMetadata",
                         "add_metadata": True,
@@ -446,15 +443,11 @@ async def download_sync(req: DownloadRequest, background_tasks: BackgroundTasks)
         base_opts = get_base_ydl_opts()
 
         if req.format == "mp3":
+            # Download best audio in m4a/aac format (no conversion needed)
             ydl_opts = {
                 **base_opts,
-                "format": "bestaudio/best",
+                "format": "bestaudio[ext=m4a]/bestaudio/best",
                 "postprocessors": [
-                    {
-                        "key": "FFmpegExtractAudio",
-                        "preferredcodec": "mp3",
-                        "preferredquality": "320",
-                    },
                     {
                         "key": "FFmpegMetadata",
                         "add_metadata": True,

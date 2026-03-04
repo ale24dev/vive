@@ -1,6 +1,5 @@
 import 'dart:io';
 
-import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../domain/storage_location.dart';
@@ -9,9 +8,6 @@ import 'storage_root.dart';
 /// Service to manage the Musik_Vive folder across internal storage and SD card
 class StorageService {
   static const String rootFolderName = 'Musik_Vive';
-
-  /// SD card path pattern: /storage/XXXX-XXXX where X is [A-F0-9]
-  static final RegExp _sdCardPattern = RegExp(r'^[A-F0-9]{4}-[A-F0-9]{4}$');
 
   List<StorageRoot> _roots = [];
 
@@ -56,85 +52,56 @@ class StorageService {
   }
 
   Future<StorageRoot?> _detectInternalStorage() async {
-    // Strategy for Android 11+:
-    // 1. Try app's external media directory (no permissions needed for write)
-    // 2. This is visible in file managers at Android/media/com.vive.app/
-
-    try {
-      // getExternalStorageDirectory gives us app-specific external storage
-      // For media files, we want the media directory which is more accessible
-      final dirs = await getExternalStorageDirectories(
-        type: StorageDirectory.music,
-      );
-
-      if (dirs != null && dirs.isNotEmpty) {
-        // This gives something like /storage/emulated/0/Android/media/com.vive.app/Music
-        // We want to use a Musik_Vive subfolder
-        final basePath = dirs.first.path;
-        final musikVivePath = '$basePath/$rootFolderName';
-        final canWrite = await _ensureFolderExists(musikVivePath);
-
-        if (canWrite) {
-          return StorageRoot(
-            path: musikVivePath,
-            location: StorageLocation.internal,
-            isAvailable: true,
-            canWrite: true,
-          );
-        }
-      }
-    } catch (e) {
-      // Fall through to legacy detection
-    }
-
-    // Fallback: Try public Music directory (requires READ_MEDIA_AUDIO to read)
-    const publicMusicPath = '/storage/emulated/0/Music/$rootFolderName';
-    final canWrite = await _ensureFolderExists(publicMusicPath);
+    // With MANAGE_EXTERNAL_STORAGE permission, use root of internal storage
+    const musikVivePath = '/storage/emulated/0/$rootFolderName';
+    final canWrite = await _ensureFolderExists(musikVivePath);
 
     if (canWrite) {
       return StorageRoot(
-        path: publicMusicPath,
+        path: musikVivePath,
         location: StorageLocation.internal,
         isAvailable: true,
         canWrite: true,
       );
     }
 
-    // Last resort: app-specific directory (always works, no permissions)
-    try {
-      final appDir = await getExternalStorageDirectory();
-      if (appDir != null) {
-        final musikVivePath = '${appDir.path}/$rootFolderName';
-        await _ensureFolderExists(musikVivePath);
+    // Fallback to /sdcard path
+    const sdcardPath = '/sdcard/$rootFolderName';
+    final canWriteSdcard = await _ensureFolderExists(sdcardPath);
 
-        return StorageRoot(
-          path: musikVivePath,
-          location: StorageLocation.internal,
-          isAvailable: true,
-          canWrite: true,
-        );
-      }
-    } catch (e) {
-      // Nothing worked
+    if (canWriteSdcard) {
+      return StorageRoot(
+        path: sdcardPath,
+        location: StorageLocation.internal,
+        isAvailable: true,
+        canWrite: true,
+      );
     }
 
     return null;
   }
 
-  /// Detect SD card by scanning /storage/ for pattern [A-F0-9]{4}-[A-F0-9]{4}
+  /// Detect SD card using /proc/mounts to find mounted SD cards
   Future<StorageRoot?> _detectSDCard() async {
-    // For SD card on Android 11+, we need to use the app-specific directory
-    // on the SD card, which doesn't require special permissions
     try {
-      final dirs = await getExternalStorageDirectories(
-        type: StorageDirectory.music,
-      );
+      // Read mount points from /proc/mounts
+      final mountsFile = File('/proc/mounts');
+      if (!mountsFile.existsSync()) return null;
 
-      if (dirs != null && dirs.length > 1) {
-        // Second directory is usually SD card
-        for (final dir in dirs.skip(1)) {
-          if (dir.path.contains(RegExp(r'/storage/[A-F0-9]{4}-[A-F0-9]{4}/'))) {
-            final musikVivePath = '${dir.path}/$rootFolderName';
+      final content = await mountsFile.readAsString();
+      final lines = content.split('\n');
+
+      for (final line in lines) {
+        // Look for SD card mount points like /storage/XXXX-XXXX
+        final match = RegExp(
+          r'/storage/([A-F0-9]{4}-[A-F0-9]{4})',
+        ).firstMatch(line);
+        if (match != null) {
+          final sdPath = '/storage/${match.group(1)}';
+          final sdDir = Directory(sdPath);
+
+          if (sdDir.existsSync()) {
+            final musikVivePath = '$sdPath/$rootFolderName';
             final canWrite = await _ensureFolderExists(musikVivePath);
 
             if (canWrite) {
@@ -149,7 +116,7 @@ class StorageService {
         }
       }
     } catch (e) {
-      // SD card detection failed
+      // Error reading mounts or accessing SD
     }
 
     return null;
@@ -170,39 +137,22 @@ class StorageService {
   Future<bool> _requestPermissions() async {
     if (!Platform.isAndroid) return true;
 
-    // For Android 13+ (API 33+), use READ_MEDIA_AUDIO
-    // For Android 10-12, use READ_EXTERNAL_STORAGE
-    // We don't need MANAGE_EXTERNAL_STORAGE - we use app-specific directories
+    // Check if MANAGE_EXTERNAL_STORAGE is granted
+    var status = await Permission.manageExternalStorage.status;
 
-    var status = await Permission.audio.status;
-
-    if (status.isDenied) {
-      status = await Permission.audio.request();
-    }
-
-    // If audio permission denied, try legacy storage permission (Android < 13)
     if (!status.isGranted) {
-      var storageStatus = await Permission.storage.status;
-      if (storageStatus.isDenied) {
-        storageStatus = await Permission.storage.request();
-      }
-      // Even if denied, we can still use app-specific directories
-      // So we return true to continue initialization
+      // Request the permission
+      status = await Permission.manageExternalStorage.request();
     }
 
-    // Always return true - we can at least use app-specific directory
-    // which doesn't require any permissions
-    return true;
+    return status.isGranted;
   }
 
   /// Check if permissions are granted
   Future<bool> hasPermissions() async {
-    if (Platform.isAndroid) {
-      final audioStatus = await Permission.audio.status;
-      final storageStatus = await Permission.storage.status;
-      return audioStatus.isGranted || storageStatus.isGranted;
-    }
-    return true;
+    if (!Platform.isAndroid) return true;
+    final status = await Permission.manageExternalStorage.status;
+    return status.isGranted;
   }
 
   /// Get all available storage roots
@@ -288,7 +238,17 @@ class StorageService {
 
   /// Get all folders in the specified root or all roots
   Future<List<String>> getFolders({StorageLocation? location}) async {
-    final folders = <String>[];
+    final foldersWithLocation = await getFoldersWithLocation(
+      location: location,
+    );
+    return foldersWithLocation.map((f) => f.path).toList();
+  }
+
+  /// Get all folders with their storage location
+  Future<List<FolderInfo>> getFoldersWithLocation({
+    StorageLocation? location,
+  }) async {
+    final folders = <FolderInfo>[];
 
     final rootsToScan = location == null || location == StorageLocation.all
         ? _roots.where((r) => r.isAvailable)
@@ -298,16 +258,17 @@ class StorageService {
       final rootDir = Directory(root.path);
       if (!rootDir.existsSync()) continue;
 
-      await _collectFolders(rootDir, '', folders);
+      await _collectFoldersWithLocation(rootDir, '', folders, root.location);
     }
 
     return folders;
   }
 
-  Future<void> _collectFolders(
+  Future<void> _collectFoldersWithLocation(
     Directory dir,
     String relativePath,
-    List<String> folders,
+    List<FolderInfo> folders,
+    StorageLocation storageLocation,
   ) async {
     try {
       await for (final entity in dir.list()) {
@@ -317,8 +278,15 @@ class StorageService {
             final folderPath = relativePath.isEmpty
                 ? folderName
                 : '$relativePath/$folderName';
-            folders.add(folderPath);
-            await _collectFolders(entity, folderPath, folders);
+            folders.add(
+              FolderInfo(path: folderPath, location: storageLocation),
+            );
+            await _collectFoldersWithLocation(
+              entity,
+              folderPath,
+              folders,
+              storageLocation,
+            );
           }
         }
       }
@@ -449,4 +417,16 @@ class ScannedFile {
     required this.modifiedAt,
     required this.storageLocation,
   });
+}
+
+class FolderInfo {
+  final String path;
+  final StorageLocation location;
+
+  const FolderInfo({required this.path, required this.location});
+
+  String get name => path.contains('/') ? path.split('/').last : path;
+
+  String get locationLabel =>
+      location == StorageLocation.internal ? 'Interna' : 'SD';
 }
