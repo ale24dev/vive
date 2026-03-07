@@ -35,6 +35,11 @@ class _SongsScreenState extends State<SongsScreen> {
   bool _loading = true;
   StorageLocation _filterLocation = StorageLocation.all;
 
+  // Search state
+  bool _isSearching = false;
+  final _searchController = TextEditingController();
+  List<Song> _searchResults = [];
+
   AudioService get _audioService => widget.audioService;
 
   @override
@@ -51,6 +56,7 @@ class _SongsScreenState extends State<SongsScreen> {
   @override
   void dispose() {
     _audioService.removeListener(_onAudioChanged);
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -75,6 +81,27 @@ class _SongsScreenState extends State<SongsScreen> {
       _currentFolder = null; // Reset folder navigation when changing filter
     });
     _loadData();
+  }
+
+  void _toggleSearch() {
+    setState(() {
+      _isSearching = !_isSearching;
+      if (!_isSearching) {
+        _searchController.clear();
+        _searchResults = [];
+      }
+    });
+  }
+
+  Future<void> _performSearch(String query) async {
+    if (query.trim().isEmpty) {
+      setState(() => _searchResults = []);
+      return;
+    }
+    final results = await widget.db.searchSongs(query);
+    if (mounted) {
+      setState(() => _searchResults = results);
+    }
   }
 
   List<Song> get _currentSongs {
@@ -432,6 +459,10 @@ class _SongsScreenState extends State<SongsScreen> {
     setState(() => _currentFolder = folder);
   }
 
+  String _storageLabel(StorageLocation location) {
+    return location == StorageLocation.internal ? 'Interna' : 'SD';
+  }
+
   void _navigateUp() {
     if (_currentFolder == null) return;
 
@@ -458,220 +489,412 @@ class _SongsScreenState extends State<SongsScreen> {
 
     return Scaffold(
       backgroundColor: Colors.transparent,
-      floatingActionButton: FloatingActionButton(
-        heroTag: 'songs_create_folder_fab',
-        onPressed: _createFolder,
-        backgroundColor: ViveTheme.primary,
-        child: const Icon(Icons.create_new_folder, color: Colors.white),
-      ),
+      floatingActionButton: _isSearching
+          ? null
+          : FloatingActionButton(
+              heroTag: 'songs_create_folder_fab',
+              onPressed: _createFolder,
+              backgroundColor: ViveTheme.primary,
+              child: const Icon(Icons.create_new_folder, color: Colors.white),
+            ),
       body: Column(
         children: [
-          // Storage filter (only show if SD card available)
-          if (widget.hasSDCard)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: SegmentedButton<StorageLocation>(
-                segments: const [
-                  ButtonSegment(
-                    value: StorageLocation.all,
-                    label: Text('Todas'),
-                    icon: Icon(Icons.storage),
-                  ),
-                  ButtonSegment(
-                    value: StorageLocation.internal,
-                    label: Text('Interna'),
-                    icon: Icon(Icons.phone_android),
-                  ),
-                  ButtonSegment(
-                    value: StorageLocation.sd,
-                    label: Text('SD'),
-                    icon: Icon(Icons.sd_card),
-                  ),
-                ],
-                selected: {_filterLocation},
-                onSelectionChanged: (selected) =>
-                    _onFilterChanged(selected.first),
-                style: ButtonStyle(visualDensity: VisualDensity.compact),
+          // Search bar
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: TextField(
+              controller: _searchController,
+              decoration: InputDecoration(
+                hintText: 'Buscar canciones...',
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon: _isSearching
+                    ? IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: _toggleSearch,
+                      )
+                    : null,
+                filled: true,
+                fillColor: ViveTheme.primaryPale.withValues(alpha: 0.5),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
               ),
+              onTap: () {
+                if (!_isSearching) {
+                  setState(() => _isSearching = true);
+                }
+              },
+              onChanged: _performSearch,
             ),
+          ),
 
-          // Breadcrumb / navigation bar
-          if (_currentFolder != null)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              color: ViveTheme.primaryPale,
-              child: Row(
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.arrow_back),
-                    onPressed: _navigateUp,
-                    tooltip: 'Volver',
-                  ),
-                  Expanded(
-                    child: Text(
-                      _currentFolder!,
-                      style: const TextStyle(fontWeight: FontWeight.w500),
-                      overflow: TextOverflow.ellipsis,
+          // Search results view
+          if (_isSearching)
+            Expanded(child: _buildSearchResults())
+          else ...[
+            // Storage filter (only show if SD card available)
+            if (widget.hasSDCard)
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
+                child: SegmentedButton<StorageLocation>(
+                  segments: const [
+                    ButtonSegment(
+                      value: StorageLocation.all,
+                      label: Text('Todas'),
+                      icon: Icon(Icons.storage),
                     ),
-                  ),
-                ],
+                    ButtonSegment(
+                      value: StorageLocation.internal,
+                      label: Text('Interna'),
+                      icon: Icon(Icons.phone_android),
+                    ),
+                    ButtonSegment(
+                      value: StorageLocation.sd,
+                      label: Text('SD'),
+                      icon: Icon(Icons.sd_card),
+                    ),
+                  ],
+                  selected: {_filterLocation},
+                  onSelectionChanged: (selected) =>
+                      _onFilterChanged(selected.first),
+                  style: ButtonStyle(visualDensity: VisualDensity.compact),
+                ),
               ),
-            ),
 
-          // Content
-          Expanded(
-            child: isEmpty
-                ? Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.music_off_outlined,
-                          size: 64,
-                          color: ViveTheme.textSecondary.withValues(alpha: 0.5),
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          _currentFolder == null
-                              ? 'Sin canciones'
-                              : 'Carpeta vacía',
-                          style: TextStyle(
-                            color: ViveTheme.textSecondary,
-                            fontSize: 16,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          _currentFolder == null
-                              ? 'Descargá música para comenzar'
-                              : 'Mové canciones aquí',
-                          style: TextStyle(
+            // Breadcrumb / navigation bar
+            if (_currentFolder != null)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                color: ViveTheme.primaryPale,
+                child: Row(
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.arrow_back),
+                      onPressed: _navigateUp,
+                      tooltip: 'Volver',
+                    ),
+                    Expanded(
+                      child: Text(
+                        _currentFolder!,
+                        style: const TextStyle(fontWeight: FontWeight.w500),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+            // Content
+            Expanded(
+              child: isEmpty
+                  ? Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.music_off_outlined,
+                            size: 64,
                             color: ViveTheme.textSecondary.withValues(
-                              alpha: 0.7,
+                              alpha: 0.5,
                             ),
-                            fontSize: 14,
                           ),
-                        ),
-                      ],
-                    ),
-                  )
-                : RefreshIndicator(
-                    onRefresh: _loadData,
-                    child: ListView(
-                      padding: const EdgeInsets.only(bottom: 80),
-                      children: [
-                        // Subfolders first
-                        ...subfolders.map(
-                          (folder) => ListTile(
-                            leading: CircleAvatar(
-                              backgroundColor: ViveTheme.primaryPale,
-                              child: const Icon(
-                                Icons.folder,
-                                color: ViveTheme.primary,
-                              ),
+                          const SizedBox(height: 16),
+                          Text(
+                            _currentFolder == null
+                                ? 'Sin canciones'
+                                : 'Carpeta vacía',
+                            style: TextStyle(
+                              color: ViveTheme.textSecondary,
+                              fontSize: 16,
                             ),
-                            title: Text(
-                              folder.name,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                            subtitle: _filterLocation == StorageLocation.all
-                                ? Text(
-                                    folder.locationLabel,
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: ViveTheme.textSecondary,
-                                    ),
-                                  )
-                                : null,
-                            trailing: const Icon(Icons.chevron_right),
-                            onTap: () {
-                              final fullPath = _currentFolder == null
-                                  ? folder.path
-                                  : '$_currentFolder/${folder.name}';
-                              _navigateToFolder(fullPath);
-                            },
                           ),
-                        ),
-
-                        if (subfolders.isNotEmpty && songs.isNotEmpty)
-                          const Divider(),
-
-                        // Songs
-                        ...songs.map((song) {
-                          final isPlaying = _audioService.isSongPlaying(song);
-                          return Dismissible(
-                            key: ValueKey(song.id),
-                            direction: DismissDirection.endToStart,
-                            background: Container(
-                              color: Colors.red.shade100,
-                              alignment: Alignment.centerRight,
-                              padding: const EdgeInsets.only(right: 16),
-                              child: const Icon(
-                                Icons.delete,
-                                color: Colors.red,
+                          const SizedBox(height: 8),
+                          Text(
+                            _currentFolder == null
+                                ? 'Descargá música para comenzar'
+                                : 'Mové canciones aquí',
+                            style: TextStyle(
+                              color: ViveTheme.textSecondary.withValues(
+                                alpha: 0.7,
                               ),
+                              fontSize: 14,
                             ),
-                            confirmDismiss: (_) => _confirmDelete(song),
-                            onDismissed: (_) => _deleteSong(song),
-                            child: ListTile(
+                          ),
+                        ],
+                      ),
+                    )
+                  : RefreshIndicator(
+                      onRefresh: _loadData,
+                      child: ListView(
+                        padding: const EdgeInsets.only(bottom: 80),
+                        children: [
+                          // Subfolders first
+                          ...subfolders.map(
+                            (folder) => ListTile(
                               leading: CircleAvatar(
-                                backgroundColor: isPlaying
-                                    ? ViveTheme.primary
-                                    : ViveTheme.primaryPale,
-                                child: Icon(
-                                  isPlaying ? Icons.pause : Icons.play_arrow,
-                                  color: isPlaying
-                                      ? Colors.white
-                                      : ViveTheme.primary,
+                                backgroundColor: ViveTheme.primaryPale,
+                                child: const Icon(
+                                  Icons.folder,
+                                  color: ViveTheme.primary,
                                 ),
                               ),
                               title: Text(
-                                song.name,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
+                                folder.name,
                                 style: const TextStyle(
                                   fontWeight: FontWeight.w500,
                                 ),
                               ),
-                              subtitle: Text(
-                                '${_formatDuration(song.durationSeconds)}${song.bpm != null ? ' • ${song.bpm} BPM' : ''}',
-                                style: TextStyle(
-                                  color: ViveTheme.textSecondary,
-                                ),
-                              ),
-                              trailing: song.bpm != null
-                                  ? Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 8,
-                                        vertical: 4,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: ViveTheme.primaryPale,
-                                        borderRadius: BorderRadius.circular(12),
-                                      ),
-                                      child: Text(
-                                        '${song.bpm}',
-                                        style: TextStyle(
-                                          color: ViveTheme.primary,
-                                          fontWeight: FontWeight.w600,
-                                          fontSize: 12,
-                                        ),
+                              subtitle: _filterLocation == StorageLocation.all
+                                  ? Text(
+                                      folder.locationLabel,
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: ViveTheme.textSecondary,
                                       ),
                                     )
                                   : null,
-                              onTap: () => _togglePlay(song),
-                              onLongPress: () => _showSongActions(song),
+                              trailing: const Icon(Icons.chevron_right),
+                              onTap: () {
+                                final fullPath = _currentFolder == null
+                                    ? folder.path
+                                    : '$_currentFolder/${folder.name}';
+                                _navigateToFolder(fullPath);
+                              },
                             ),
-                          );
-                        }),
-                      ],
+                          ),
+
+                          if (subfolders.isNotEmpty && songs.isNotEmpty)
+                            const Divider(),
+
+                          // Songs
+                          ...songs.map((song) {
+                            final isPlaying = _audioService.isSongPlaying(song);
+                            return Dismissible(
+                              key: ValueKey(song.id),
+                              direction: DismissDirection.endToStart,
+                              background: Container(
+                                color: Colors.red.shade100,
+                                alignment: Alignment.centerRight,
+                                padding: const EdgeInsets.only(right: 16),
+                                child: const Icon(
+                                  Icons.delete,
+                                  color: Colors.red,
+                                ),
+                              ),
+                              confirmDismiss: (_) => _confirmDelete(song),
+                              onDismissed: (_) => _deleteSong(song),
+                              child: ListTile(
+                                leading: CircleAvatar(
+                                  backgroundColor: isPlaying
+                                      ? ViveTheme.primary
+                                      : ViveTheme.primaryPale,
+                                  child: Icon(
+                                    isPlaying ? Icons.pause : Icons.play_arrow,
+                                    color: isPlaying
+                                        ? Colors.white
+                                        : ViveTheme.primary,
+                                  ),
+                                ),
+                                title: Text(
+                                  song.name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                subtitle: Text(
+                                  '${_formatDuration(song.durationSeconds)}${song.bpm != null ? ' • ${song.bpm} BPM' : ''}',
+                                  style: TextStyle(
+                                    color: ViveTheme.textSecondary,
+                                  ),
+                                ),
+                                trailing: song.bpm != null
+                                    ? Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 8,
+                                          vertical: 4,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: ViveTheme.primaryPale,
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
+                                        ),
+                                        child: Text(
+                                          '${song.bpm}',
+                                          style: TextStyle(
+                                            color: ViveTheme.primary,
+                                            fontWeight: FontWeight.w600,
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                      )
+                                    : null,
+                                onTap: () => _togglePlay(song),
+                                onLongPress: () => _showSongActions(song),
+                              ),
+                            );
+                          }),
+                        ],
+                      ),
                     ),
-                  ),
-          ),
+            ),
+          ],
         ],
       ),
+    );
+  }
+
+  Widget _buildSearchResults() {
+    if (_searchController.text.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.search,
+              size: 64,
+              color: ViveTheme.textSecondary.withValues(alpha: 0.5),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Buscá canciones',
+              style: TextStyle(color: ViveTheme.textSecondary, fontSize: 16),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Busca en todas las carpetas y storages',
+              style: TextStyle(
+                color: ViveTheme.textSecondary.withValues(alpha: 0.7),
+                fontSize: 14,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (_searchResults.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.music_off_outlined,
+              size: 64,
+              color: ViveTheme.textSecondary.withValues(alpha: 0.5),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Sin resultados',
+              style: TextStyle(color: ViveTheme.textSecondary, fontSize: 16),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Probá con otro término',
+              style: TextStyle(
+                color: ViveTheme.textSecondary.withValues(alpha: 0.7),
+                fontSize: 14,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.only(bottom: 80),
+      itemCount: _searchResults.length,
+      itemBuilder: (context, index) {
+        final song = _searchResults[index];
+        final isPlaying = _audioService.isSongPlaying(song);
+
+        return ListTile(
+          leading: CircleAvatar(
+            backgroundColor: isPlaying
+                ? ViveTheme.primary
+                : ViveTheme.primaryPale,
+            child: Icon(
+              isPlaying ? Icons.pause : Icons.play_arrow,
+              color: isPlaying ? Colors.white : ViveTheme.primary,
+            ),
+          ),
+          title: Text(
+            song.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontWeight: FontWeight.w500),
+          ),
+          subtitle: Row(
+            children: [
+              // Storage badge
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: song.storageLocation == StorageLocation.sd
+                      ? Colors.orange.shade100
+                      : Colors.blue.shade100,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  _storageLabel(song.storageLocation),
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    color: song.storageLocation == StorageLocation.sd
+                        ? Colors.orange.shade800
+                        : Colors.blue.shade800,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              // Folder path
+              if (song.folder != null)
+                Expanded(
+                  child: Text(
+                    song.folder!,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: ViveTheme.textSecondary,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+            ],
+          ),
+          trailing: song.bpm != null
+              ? Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: ViveTheme.primaryPale,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    '${song.bpm}',
+                    style: TextStyle(
+                      color: ViveTheme.primary,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 12,
+                    ),
+                  ),
+                )
+              : null,
+          onTap: () => _togglePlay(song),
+          onLongPress: () => _showSongActions(song),
+        );
+      },
     );
   }
 }

@@ -316,6 +316,20 @@ class ViveDatabase {
     );
     return maps.isEmpty ? null : Song.fromMap(maps.first);
   }
+
+  /// Search songs by name across all storage locations
+  Future<List<Song>> searchSongs(String query) async {
+    if (query.trim().isEmpty) return [];
+
+    final db = await database;
+    final maps = await db.query(
+      'songs',
+      where: 'name LIKE ?',
+      whereArgs: ['%${query.trim()}%'],
+      orderBy: 'name ASC',
+    );
+    return maps.map(Song.fromMap).toList();
+  }
 }
 
 class SyncResult {
