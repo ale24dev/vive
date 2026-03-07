@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'data/audio_service.dart';
 import 'data/database.dart';
 import 'data/preferences_service.dart';
 import 'data/storage_service.dart';
@@ -8,6 +9,7 @@ import 'ui/screens/classes_screen.dart';
 import 'ui/screens/download_screen.dart';
 import 'ui/screens/songs_screen.dart';
 import 'ui/theme/vive_theme.dart';
+import 'ui/widgets/music_player.dart';
 
 void main() {
   runApp(const ViveApp());
@@ -146,6 +148,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   final _db = ViveDatabase();
   final _preferences = PreferencesService();
+  final _audioService = AudioService.instance;
   int _currentIndex = 0;
   bool _syncing = false;
   bool _hasSDCard = false;
@@ -156,6 +159,17 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _initializeServices();
+    _audioService.addListener(_onAudioStateChanged);
+  }
+
+  void _onAudioStateChanged() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _audioService.removeListener(_onAudioStateChanged);
+    super.dispose();
   }
 
   Future<void> _initializeServices() async {
@@ -195,8 +209,22 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  void _showExpandedPlayer() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => MusicPlayer(
+        audioService: _audioService,
+        onClose: () => Navigator.pop(context),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final hasActivePlayer = _audioService.isActive;
+
     return Scaffold(
       appBar: AppBar(
         title: Text(_getTitle()),
@@ -218,29 +246,46 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
         ],
       ),
-      body: IndexedStack(
-        index: _currentIndex,
+      body: Column(
         children: [
-          _SongsTab(
-            key: _songsKey,
-            db: _db,
-            storage: widget.storage,
-            hasSDCard: _hasSDCard,
+          Expanded(
+            child: IndexedStack(
+              index: _currentIndex,
+              children: [
+                _SongsTab(
+                  key: _songsKey,
+                  db: _db,
+                  storage: widget.storage,
+                  hasSDCard: _hasSDCard,
+                  audioService: _audioService,
+                ),
+                ClassesScreen(
+                  db: _db,
+                  storage: widget.storage,
+                  hasSDCard: _hasSDCard,
+                ),
+                DownloadScreen(
+                  db: _db,
+                  storage: widget.storage,
+                  preferences: _preferences,
+                  hasSDCard: _hasSDCard,
+                  onDownloadComplete: () {
+                    _syncFiles();
+                  },
+                ),
+              ],
+            ),
           ),
-          ClassesScreen(
-            db: _db,
-            storage: widget.storage,
-            hasSDCard: _hasSDCard,
-          ),
-          DownloadScreen(
-            db: _db,
-            storage: widget.storage,
-            preferences: _preferences,
-            hasSDCard: _hasSDCard,
-            onDownloadComplete: () {
-              _syncFiles();
-            },
-          ),
+          // Mini player - shown when music is active
+          if (hasActivePlayer && _audioService.currentSong != null)
+            MiniMusicPlayer(
+              song: _audioService.currentSong!,
+              isPlaying: _audioService.isPlaying,
+              positionStream: _audioService.positionStream,
+              duration: _audioService.duration,
+              onTap: _showExpandedPlayer,
+              onPlayPause: _audioService.togglePlayPause,
+            ),
         ],
       ),
       bottomNavigationBar: BottomNavigationBar(
@@ -286,11 +331,13 @@ class _SongsTab extends StatefulWidget {
   final ViveDatabase db;
   final StorageService storage;
   final bool hasSDCard;
+  final AudioService audioService;
 
   const _SongsTab({
     super.key,
     required this.db,
     required this.storage,
+    required this.audioService,
     this.hasSDCard = false,
   });
 
@@ -310,6 +357,7 @@ class _SongsTabState extends State<_SongsTab> {
       db: widget.db,
       storage: widget.storage,
       hasSDCard: widget.hasSDCard,
+      audioService: widget.audioService,
     );
   }
 }

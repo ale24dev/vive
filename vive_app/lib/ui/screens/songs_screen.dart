@@ -1,8 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:just_audio/just_audio.dart';
 
+import '../../data/audio_service.dart';
 import '../../data/database.dart';
 import '../../data/storage_service.dart';
 import '../../domain/song.dart';
@@ -14,11 +14,13 @@ class SongsScreen extends StatefulWidget {
   final ViveDatabase db;
   final StorageService storage;
   final bool hasSDCard;
+  final AudioService audioService;
 
   const SongsScreen({
     super.key,
     required this.db,
     required this.storage,
+    required this.audioService,
     this.hasSDCard = false,
   });
 
@@ -31,27 +33,24 @@ class _SongsScreenState extends State<SongsScreen> {
   List<FolderInfo> _folders = [];
   String? _currentFolder; // null = root
   bool _loading = true;
-  final _player = AudioPlayer();
-  int? _playingId;
-  StreamSubscription? _playerSubscription;
   StorageLocation _filterLocation = StorageLocation.all;
+
+  AudioService get _audioService => widget.audioService;
 
   @override
   void initState() {
     super.initState();
     _loadData();
-    _playerSubscription = _player.playerStateStream.listen((state) {
-      if (!mounted) return;
-      if (state.processingState == ProcessingState.completed) {
-        setState(() => _playingId = null);
-      }
-    });
+    _audioService.addListener(_onAudioChanged);
+  }
+
+  void _onAudioChanged() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
-    _playerSubscription?.cancel();
-    _player.dispose();
+    _audioService.removeListener(_onAudioChanged);
     super.dispose();
   }
 
@@ -102,18 +101,18 @@ class _SongsScreenState extends State<SongsScreen> {
   }
 
   Future<void> _togglePlay(Song song) async {
-    if (_playingId == song.id) {
-      await _player.stop();
-      setState(() => _playingId = null);
+    if (_audioService.isSongActive(song)) {
+      // Same song - toggle play/pause
+      await _audioService.togglePlayPause();
     } else {
-      setState(() => _playingId = song.id);
-      debugPrint('Playing: ${song.filePath}');
-      try {
-        await _player.setFilePath(song.filePath);
-        await _player.play();
-      } catch (e) {
-        debugPrint('Error playing: $e');
-        setState(() => _playingId = null);
+      // Different song - play the current folder as a playlist
+      final songs = _currentSongs;
+      final index = songs.indexWhere((s) => s.id == song.id);
+      if (index >= 0) {
+        await _audioService.playPlaylist(songs, startIndex: index);
+      } else {
+        // Fallback: play single song
+        await _audioService.playSong(song);
       }
     }
   }
@@ -415,9 +414,8 @@ class _SongsScreenState extends State<SongsScreen> {
   }
 
   Future<void> _deleteSong(Song song) async {
-    if (_playingId == song.id) {
-      await _player.stop();
-      setState(() => _playingId = null);
+    if (_audioService.isSongActive(song)) {
+      await _audioService.stop();
     }
     await widget.storage.deleteFile(song.filePath);
     await widget.db.deleteSong(song.id!);
@@ -602,7 +600,7 @@ class _SongsScreenState extends State<SongsScreen> {
 
                         // Songs
                         ...songs.map((song) {
-                          final isPlaying = _playingId == song.id;
+                          final isPlaying = _audioService.isSongPlaying(song);
                           return Dismissible(
                             key: ValueKey(song.id),
                             direction: DismissDirection.endToStart,
