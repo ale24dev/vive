@@ -1,8 +1,6 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
-import 'package:just_audio/just_audio.dart';
 
+import '../../data/audio_service.dart';
 import '../../data/database.dart';
 import '../../data/storage_service.dart';
 import '../../domain/dance_class.dart';
@@ -32,27 +30,24 @@ class _ClassDetailScreenState extends State<ClassDetailScreen> {
   List<Song> _classSongs = [];
   List<Song> _allSongs = [];
   bool _loading = true;
-  final _player = AudioPlayer();
-  int? _playingId;
-  StreamSubscription? _playerSubscription;
+
+  AudioService get _audioService => AudioService.instance;
 
   @override
   void initState() {
     super.initState();
     _loadData();
-    _playerSubscription = _player.playerStateStream.listen((state) {
-      if (!mounted) return;
-      if (state.processingState == ProcessingState.completed) {
-        setState(() => _playingId = null);
-      }
-    });
+    _audioService.addListener(_onAudioChanged);
   }
 
   @override
   void dispose() {
-    _playerSubscription?.cancel();
-    _player.dispose();
+    _audioService.removeListener(_onAudioChanged);
     super.dispose();
+  }
+
+  void _onAudioChanged() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _loadData() async {
@@ -120,13 +115,17 @@ class _ClassDetailScreenState extends State<ClassDetailScreen> {
   }
 
   Future<void> _togglePlay(Song song) async {
-    if (_playingId == song.id) {
-      await _player.stop();
-      setState(() => _playingId = null);
+    if (_audioService.isSongActive(song)) {
+      // Same song - toggle play/pause
+      await _audioService.togglePlayPause();
     } else {
-      await _player.setFilePath(song.filePath);
-      await _player.play();
-      setState(() => _playingId = song.id);
+      // Different song - play the class songs as a playlist
+      final index = _classSongs.indexWhere((s) => s.id == song.id);
+      if (index >= 0) {
+        await _audioService.playPlaylist(_classSongs, startIndex: index);
+      } else {
+        await _audioService.playSong(song);
+      }
     }
   }
 
@@ -196,7 +195,7 @@ class _ClassDetailScreenState extends State<ClassDetailScreen> {
                           },
                           itemBuilder: (context, index) {
                             final song = _classSongs[index];
-                            final isPlaying = _playingId == song.id;
+                            final isPlaying = _audioService.isSongPlaying(song);
 
                             return Dismissible(
                               key: ValueKey(song.id),

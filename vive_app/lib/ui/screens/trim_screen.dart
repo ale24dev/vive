@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:just_audio/just_audio.dart';
 
+import '../../data/audio_service.dart';
 import '../../data/database.dart';
 import '../../data/storage_service.dart';
 import '../../data/trim_service.dart';
@@ -38,6 +39,7 @@ class _TrimScreenState extends State<TrimScreen> with TickerProviderStateMixin {
 
   bool _isPlaying = false;
   bool _isProcessing = false;
+  bool _wasMainPlayerPlaying = false;
 
   StreamSubscription? _playerSubscription;
   StreamSubscription? _positionSubscription;
@@ -123,6 +125,13 @@ class _TrimScreenState extends State<TrimScreen> with TickerProviderStateMixin {
       if (!mounted) return;
       setState(() => _isPlaying = false);
     } else {
+      // Pause the main audio service before playing locally
+      final mainPlayer = AudioService.instance;
+      if (mainPlayer.isPlaying) {
+        _wasMainPlayerPlaying = true;
+        await mainPlayer.pause();
+      }
+
       await _player.seek(Duration(milliseconds: _startMs));
       await _player.play();
       if (!mounted) return;
