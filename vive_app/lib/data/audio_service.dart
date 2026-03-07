@@ -226,6 +226,20 @@ class AudioService extends ChangeNotifier {
     return currentSong?.id == song.id;
   }
 
+  /// Get audio duration from a file path without playing it
+  /// Returns null if the file cannot be loaded
+  static Future<Duration?> getDuration(String filePath) async {
+    try {
+      final player = AudioPlayer();
+      final duration = await player.setFilePath(filePath);
+      await player.dispose();
+      return duration;
+    } catch (e) {
+      debugPrint('Error getting duration for $filePath: $e');
+      return null;
+    }
+  }
+
   /// Format a duration as mm:ss
   static String formatDuration(Duration duration) {
     final minutes = duration.inMinutes;

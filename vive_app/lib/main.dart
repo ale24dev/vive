@@ -200,7 +200,9 @@ class _HomeScreenState extends State<HomeScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'Sincronizado: ${result.added} nuevas, ${result.removed} eliminadas',
+              result.updated > 0
+                  ? 'Sincronizado: ${result.added} nuevas, ${result.updated} actualizadas, ${result.removed} eliminadas'
+                  : 'Sincronizado: ${result.added} nuevas, ${result.removed} eliminadas',
             ),
             duration: const Duration(seconds: 2),
           ),
@@ -346,18 +348,24 @@ class _SongsTab extends StatefulWidget {
 }
 
 class _SongsTabState extends State<_SongsTab> {
+  int _refreshVersion = 0;
+
   void refresh() {
-    setState(() {});
+    // Increment version to trigger SongsScreen to reload
+    setState(() {
+      _refreshVersion++;
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     return SongsScreen(
-      key: ValueKey(DateTime.now()),
+      refreshVersion: _refreshVersion,
       db: widget.db,
       storage: widget.storage,
       hasSDCard: widget.hasSDCard,
       audioService: widget.audioService,
+      onRefreshNeeded: refresh,
     );
   }
 }

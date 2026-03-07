@@ -4,6 +4,7 @@ import 'package:sqflite/sqflite.dart';
 import '../domain/dance_class.dart';
 import '../domain/song.dart';
 import '../domain/storage_location.dart';
+import 'audio_service.dart';
 import 'storage_service.dart';
 
 class ViveDatabase {
@@ -226,20 +227,26 @@ class ViveDatabase {
   // ─── Sync with Filesystem ────────────────────────────────────────────────
 
   /// Sync database with filesystem - add new files, remove deleted ones
+  /// Also updates duration for songs that have duration = 0
   Future<SyncResult> syncWithFilesystem(List<ScannedFile> scannedFiles) async {
     int added = 0;
+    int updated = 0;
     int removed = 0;
 
     // Get all songs from database
     final existingSongs = await getAllSongs();
     final existingPaths = {for (final s in existingSongs) s.filePath: s};
 
-    // Add new files
+    // Add new files with their duration
     for (final file in scannedFiles) {
       if (!existingPaths.containsKey(file.absolutePath)) {
+        // Get duration from audio file
+        final duration = await AudioService.getDuration(file.absolutePath);
+        final durationSeconds = duration?.inSeconds ?? 0;
+
         final song = Song(
           name: _extractSongName(file.fileName),
-          durationSeconds: 0, // Will be updated when played
+          durationSeconds: durationSeconds,
           filePath: file.absolutePath,
           folder: file.folder,
           createdAt: file.modifiedAt,
@@ -247,6 +254,17 @@ class ViveDatabase {
         );
         await insertSong(song);
         added++;
+      }
+    }
+
+    // Update duration for existing songs with duration = 0
+    for (final song in existingSongs) {
+      if (song.durationSeconds == 0) {
+        final duration = await AudioService.getDuration(song.filePath);
+        if (duration != null && duration.inSeconds > 0) {
+          await updateSong(song.copyWith(durationSeconds: duration.inSeconds));
+          updated++;
+        }
       }
     }
 
@@ -259,7 +277,7 @@ class ViveDatabase {
       }
     }
 
-    return SyncResult(added: added, removed: removed);
+    return SyncResult(added: added, updated: updated, removed: removed);
   }
 
   String _extractSongName(String fileName) {
@@ -334,9 +352,14 @@ class ViveDatabase {
 
 class SyncResult {
   final int added;
+  final int updated;
   final int removed;
 
-  const SyncResult({required this.added, required this.removed});
+  const SyncResult({
+    required this.added,
+    required this.updated,
+    required this.removed,
+  });
 
-  bool get hasChanges => added > 0 || removed > 0;
+  bool get hasChanges => added > 0 || updated > 0 || removed > 0;
 }

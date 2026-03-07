@@ -15,6 +15,9 @@ class SongsScreen extends StatefulWidget {
   final StorageService storage;
   final bool hasSDCard;
   final AudioService audioService;
+  final VoidCallback? onRefreshNeeded;
+  final Future<void> Function()? refreshCallback;
+  final int refreshVersion; // Increment to trigger reload
 
   const SongsScreen({
     super.key,
@@ -22,6 +25,9 @@ class SongsScreen extends StatefulWidget {
     required this.storage,
     required this.audioService,
     this.hasSDCard = false,
+    this.onRefreshNeeded,
+    this.refreshCallback,
+    this.refreshVersion = 0,
   });
 
   @override
@@ -51,6 +57,23 @@ class _SongsScreenState extends State<SongsScreen> {
 
   void _onAudioChanged() {
     if (mounted) setState(() {});
+  }
+
+  /// Public method to refresh songs - called from parent via callback
+  Future<void> refreshSongs() async {
+    await _loadData();
+  }
+
+  int _lastRefreshVersion = 0;
+
+  @override
+  void didUpdateWidget(covariant SongsScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // If refreshVersion changed, reload data
+    if (widget.refreshVersion != _lastRefreshVersion) {
+      _lastRefreshVersion = widget.refreshVersion;
+      _loadData();
+    }
   }
 
   @override
